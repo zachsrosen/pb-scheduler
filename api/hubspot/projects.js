@@ -8,6 +8,17 @@
 
 import { Client } from '@hubspot/api-client';
 
+// Project Pipeline Stage IDs (from HubSpot)
+const STAGE_IDS = {
+    rtb: '22580871',           // Ready To Build
+    blocked: '71052436',       // RTB - Blocked
+    construction: '20440342',  // Construction
+    inspection: '22580872'     // Inspection
+};
+
+// All schedulable stages
+const SCHEDULABLE_STAGES = Object.values(STAGE_IDS);
+
 const PROPERTY_MAP = {
   name: 'dealname',
   amount: 'amount',
@@ -27,10 +38,10 @@ const PROPERTY_MAP = {
 
 // Friendly stage labels for display
 const STAGE_LABELS = {
-  'rtb': 'Ready to Build',
-  'blocked': 'RTB Blocked',
-  'construction': 'Construction',
-  'inspection': 'Inspection',
+    '22580871': 'Ready to Build',
+    '71052436': 'RTB - Blocked',
+    '20440342': 'Construction',
+    '22580872': 'Inspection'
 };
 
 export default async function handler(req, res) {
@@ -83,26 +94,33 @@ export default async function handler(req, res) {
       });
     }
 
-    // Normal mode: fetch deals without stage filter to get all deals
-    const filterGroups = [];
+    // Build filters for schedulable projects
+        const filters = [];
 
-    if (location && location !== 'All') {
-      filterGroups.push({
-        filters: [
-          { propertyName: 'pb_location', operator: 'EQ', value: location }
-        ]
-      });
-    }
+        // Filter by schedulable stages (default) or specific stage
+        const stageFilter = SCHEDULABLE_STAGES;
 
+        // Add stage filter - use IN operator for multiple stages
+        filters.push({
+                propertyName: 'dealstage',
+                operator: 'IN',
+                values: stageFilter
+        });
+
+        // Add location filter if specified
+        if (location && location !== 'All') {
+                filters.push({
+                          propertyName: 'pb_location',
+                          operator: 'EQ',
+                          value: location
+                });
+        }
     const searchRequest = {
+            filterGroups: [{ filters }],
       properties,
       limit: 100,
       sorts: [{ propertyName: 'amount', direction: 'DESCENDING' }]
     };
-
-    if (filterGroups.length > 0) {
-      searchRequest.filterGroups = filterGroups;
-    }
 
     const response = await hubspotClient.crm.deals.searchApi.doSearch(searchRequest);
 
