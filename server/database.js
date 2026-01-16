@@ -1,142 +1,160 @@
 /**
- * SQLite Database for storing schedules and crew assignments
+ * JSON File-based storage for schedules and crew assignments
+ * Compatible with Vercel serverless environment
  */
 
-const Database = require('better-sqlite3');
+const fs = require('fs');
 const path = require('path');
 
-const dbPath = process.env.DATABASE_PATH || path.join(__dirname, '../database/scheduler.db');
-let db;
+// Use /tmp for Vercel serverless (writable) or local database folder
+const dataDir = process.env.VERCEL ? '/tmp' : path.join(__dirname, '../database');
+const schedulesPath = path.join(dataDir, 'schedules.json');
+const crewsPath = path.join(dataDir, 'crews.json');
 
-function getDb() {
-  if (!db) {
-    db = new Database(dbPath);
-    db.pragma('journal_mode = WAL');
+// In-memory cache for serverless
+let schedulesCache = null;
+let crewsCache = null;
+
+// Default crews configuration
+const defaultCrews = [
+  { id: 1, name: 'WESTY Alpha', location: 'Westminster', roofers: 2, electricians: 1, color: '#3b82f6', active: 1 },
+  { id: 2, name: 'WESTY Bravo', location: 'Westminster', roofers: 2, electricians: 1, color: '#10b981', active: 1 },
+  { id: 3, name: 'DTC Alpha', location: 'Centennial', roofers: 2, electricians: 1, color: '#8b5cf6', active: 1 },
+  { id: 4, name: 'DTC Bravo', location: 'Centennial', roofers: 2, electricians: 1, color: '#ec4899', active: 1 },
+  { id: 5, name: 'COSP Alpha', location: 'Colorado Springs', roofers: 3, electricians: 1, color: '#f97316', active: 1 },
+  { id: 6, name: 'SLO Solar', location: 'San Luis Obispo', roofers: 2, electricians: 1, color: '#06b6d4', active: 1 },
+  { id: 7, name: 'SLO Electrical 1', location: 'San Luis Obispo', roofers: 0, electricians: 2, color: '#a855f7', active: 1 },
+  { id: 8, name: 'SLO Electrical 2', location: 'San Luis Obispo', roofers: 0, electricians: 2, color: '#14b8a6', active: 1 },
+  { id: 9, name: 'CAM Crew', location: 'Camarillo', roofers: 2, electricians: 1, color: '#f43f5e', active: 1 },
+  { id: 10, name: 'SBA Alpha', location: 'Santa Barbara', roofers: 2, electricians: 1, color: '#eab308', active: 1 },
+  { id: 11, name: 'SBA Bravo', location: 'Santa Barbara', roofers: 2, electricians: 1, color: '#84cc16', active: 1 }
+  ];
+
+function ensureDir() {
+    if (!fs.existsSync(dataDir)) {
+          fs.mkdirSync(dataDir, { recursive: true });
+    }
+}
+
+function loadSchedules() {
+    if (schedulesCache) return schedulesCache;
+
+  try {
+        if (fs.existsSync(schedulesPath)) {
+                schedulesCache = JSON.parse(fs.readFileSync(schedulesPath, 'utf8'));
+        } else {
+                schedulesCache = [];
+        }
+  } catch (e) {
+        console.error('Error loading schedules:', e);
+        schedulesCache = [];
   }
-  return db;
+    return schedulesCache;
+}
+
+function saveSchedules(data) {
+    ensureDir();
+    schedulesCache = data;
+    fs.writeFileSync(schedulesPath, JSON.stringify(data, null, 2));
+}
+
+function loadCrews() {
+    if (crewsCache) return crewsCache;
+
+  try {
+        if (fs.existsSync(crewsPath)) {
+                crewsCache = JSON.parse(fs.readFileSync(crewsPath, 'utf8'));
+        } else {
+                crewsCache = [...defaultCrews];
+                saveCrews(crewsCache);
+        }
+  } catch (e) {
+        console.error('Error loading crews:', e);
+        crewsCache = [...defaultCrews];
+  }
+    return crewsCache;
+}
+
+function saveCrews(data) {
+    ensureDir();
+    crewsCache = data;
+    fs.writeFileSync(crewsPath, JSON.stringify(data, null, 2));
 }
 
 function initialize() {
-  const database = getDb();
-
-  // Schedules table - stores manual schedule assignments
-  database.exec(`
-    CREATE TABLE IF NOT EXISTS schedules (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      project_id TEXT NOT NULL UNIQUE,
-      start_date TEXT NOT NULL,
-      days INTEGER DEFAULT 2,
-      crew TEXT,
-      notes TEXT,
-      created_by TEXT,
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-
-  // Crews table - stores crew configurations
-  database.exec(`
-    CREATE TABLE IF NOT EXISTS crews (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL UNIQUE,
-      location TEXT NOT NULL,
-      roofers INTEGER DEFAULT 2,
-      electricians INTEGER DEFAULT 1,
-      color TEXT DEFAULT '#3b82f6',
-      active INTEGER DEFAULT 1
-    )
-  `);
-
-  // Activity log for audit trail
-  database.exec(`
-    CREATE TABLE IF NOT EXISTS activity_log (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      action TEXT NOT NULL,
-      project_id TEXT,
-      user_email TEXT,
-      details TEXT,
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-
-  // Insert default crews if empty
-  const crewCount = database.prepare('SELECT COUNT(*) as count FROM crews').get();
-  if (crewCount.count === 0) {
-    const insertCrew = database.prepare(`
-      INSERT INTO crews (name, location, roofers, electricians, color) VALUES (?, ?, ?, ?, ?)
-    `);
-
-    const defaultCrews = [
-      ['WESTY Alpha', 'Westminster', 2, 1, '#3b82f6'],
-      ['WESTY Bravo', 'Westminster', 2, 1, '#10b981'],
-      ['DTC Alpha', 'Centennial', 2, 1, '#8b5cf6'],
-      ['DTC Bravo', 'Centennial', 2, 1, '#ec4899'],
-      ['COSP Alpha', 'Colorado Springs', 3, 1, '#f97316'],
-      ['SLO Solar', 'San Luis Obispo', 2, 1, '#06b6d4'],
-      ['SLO Electrical 1', 'San Luis Obispo', 0, 2, '#a855f7'],
-      ['SLO Electrical 2', 'San Luis Obispo', 0, 2, '#14b8a6'],
-      ['CAM Crew', 'Camarillo', 2, 1, '#f43f5e']
-    ];
-
-    defaultCrews.forEach(crew => insertCrew.run(...crew));
-    console.log('✅ Default crews initialized');
-  }
-
-  console.log('✅ Database initialized');
+    ensureDir();
+    loadSchedules();
+    loadCrews();
+    console.log('Database initialized');
 }
 
 // Schedule CRUD operations
 const schedules = {
-  getAll() {
-    return getDb().prepare('SELECT * FROM schedules ORDER BY start_date').all();
-  },
+    getAll() {
+          return loadSchedules().sort((a, b) => new Date(a.start_date) - new Date(b.start_date));
+    },
 
-  getByProjectId(projectId) {
-    return getDb().prepare('SELECT * FROM schedules WHERE project_id = ?').get(projectId);
-  },
+    getByProjectId(projectId) {
+          return loadSchedules().find(s => s.project_id === projectId);
+    },
 
-  upsert(schedule) {
-    const stmt = getDb().prepare(`
-      INSERT INTO schedules (project_id, start_date, days, crew, notes, created_by, updated_at)
-      VALUES (@project_id, @start_date, @days, @crew, @notes, @created_by, CURRENT_TIMESTAMP)
-      ON CONFLICT(project_id) DO UPDATE SET
-        start_date = @start_date,
-        days = @days,
-        crew = @crew,
-        notes = @notes,
-        updated_at = CURRENT_TIMESTAMP
-    `);
-    return stmt.run(schedule);
-  },
+    upsert(schedule) {
+          const data = loadSchedules();
+          const idx = data.findIndex(s => s.project_id === schedule.project_id);
 
-  delete(projectId) {
-    return getDb().prepare('DELETE FROM schedules WHERE project_id = ?').run(projectId);
-  }
+      const record = {
+              ...schedule,
+              updated_at: new Date().toISOString()
+      };
+
+      if (idx >= 0) {
+              data[idx] = { ...data[idx], ...record };
+      } else {
+              record.id = data.length ? Math.max(...data.map(s => s.id || 0)) + 1 : 1;
+              record.created_at = new Date().toISOString();
+              data.push(record);
+      }
+
+      saveSchedules(data);
+          return { changes: 1 };
+    },
+
+    delete(projectId) {
+          const data = loadSchedules();
+          const filtered = data.filter(s => s.project_id !== projectId);
+          saveSchedules(filtered);
+          return { changes: data.length - filtered.length };
+    }
 };
 
 // Crew operations
 const crews = {
-  getAll() {
-    return getDb().prepare('SELECT * FROM crews WHERE active = 1 ORDER BY location, name').all();
-  },
+    getAll() {
+          return loadCrews().filter(c => c.active === 1).sort((a, b) => {
+                  if (a.location !== b.location) return a.location.localeCompare(b.location);
+                  return a.name.localeCompare(b.name);
+          });
+    },
 
-  getByLocation(location) {
-    return getDb().prepare('SELECT * FROM crews WHERE location = ? AND active = 1').all(location);
-  },
+    getByLocation(location) {
+          return loadCrews().filter(c => c.location === location && c.active === 1);
+    },
 
-  update(id, data) {
-    const stmt = getDb().prepare(`
-      UPDATE crews SET name = ?, location = ?, roofers = ?, electricians = ?, color = ? WHERE id = ?
-    `);
-    return stmt.run(data.name, data.location, data.roofers, data.electricians, data.color, id);
-  }
+    update(id, data) {
+          const allCrews = loadCrews();
+          const idx = allCrews.findIndex(c => c.id === id);
+          if (idx >= 0) {
+                  allCrews[idx] = { ...allCrews[idx], ...data };
+                  saveCrews(allCrews);
+                  return { changes: 1 };
+          }
+          return { changes: 0 };
+    }
 };
 
-// Activity logging
+// Activity logging (simplified - just console log for now)
 function logActivity(action, projectId, userEmail, details) {
-  getDb().prepare(`
-    INSERT INTO activity_log (action, project_id, user_email, details) VALUES (?, ?, ?, ?)
-  `).run(action, projectId, userEmail, JSON.stringify(details));
+    console.log(`[ACTIVITY] ${action} - Project: ${projectId} - User: ${userEmail}`, details);
 }
 
-module.exports = { initialize, getDb, schedules, crews, logActivity };
+module.exports = { initialize, schedules, crews, logActivity };
