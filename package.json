@@ -1,0 +1,27 @@
+{
+  "name": "pb-scheduler",
+  "version": "1.0.0",
+  "description": "Photon Brothers Installation Scheduler with HubSpot Integration",
+  "scripts": {
+    "dev": "concurrently \"npm run server\" \"npm run client\"",
+    "server": "node server/index.js",
+    "client": "cd client && npm run dev",
+    "build": "cd client && npm run build",
+    "start": "NODE_ENV=production node server/index.js",
+    "setup": "npm install && cd client && npm install"
+  },
+  "dependencies": {
+    "@hubspot/api-client": "^11.1.0",
+    "better-sqlite3": "^9.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.1",
+    "express": "^4.18.2",
+    "express-session": "^1.18.0",
+    "helmet": "^7.1.0",
+    "morgan": "^1.10.0"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "nodemon": "^3.0.3"
+  }
+}
